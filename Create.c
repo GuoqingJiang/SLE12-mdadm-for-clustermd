@@ -879,6 +879,8 @@ int Create(struct supertype *st, char *mddev,
 
 				if (dv->writemostly == 1)
 					inf->disk.state |= (1<<MD_DISK_WRITEMOSTLY);
+				if (dv->failfast == 1)
+					inf->disk.state |= (1<<MD_DISK_FAILFAST);
 
 				if (have_container)
 					fd = -1;
