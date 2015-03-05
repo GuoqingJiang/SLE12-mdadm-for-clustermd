@@ -101,6 +101,7 @@ endif
 # If you want a static binary, you might uncomment these
 # LDFLAGS = -static
 # STRIP = -s
+LDLIBS=-ldl
 
 INSTALL = /usr/bin/install
 DESTDIR =

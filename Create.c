@@ -539,6 +539,7 @@ int Create(struct supertype *st, char *mddev,
 		warn = 1;
 	}
 	st->cluster_nodes = c->nodes;
+	st->cluster_name = c->homecluster;
 
 	if (warn) {
 		if (c->runstop!= 1) {

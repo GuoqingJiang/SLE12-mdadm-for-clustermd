@@ -604,6 +604,13 @@ int main(int argc, char *argv[])
 				exit(2);
 			}
 			continue;
+		case O(CREATE, ClusterName):
+			c.homecluster = optarg;
+			if (strlen(c.homecluster) > 64) {
+				pr_err("Cluster name too big.\n");
+				exit(ERANGE);
+			}
+			continue;
 		case O(CREATE,'x'): /* number of spare (eXtra) disks */
 			if (s.sparedisks) {
 				pr_err("spare-devices set twice: %d and %s\n",
@@ -1287,6 +1294,18 @@ int main(int argc, char *argv[])
 	if (c.homehost && (!c.homehost[0] || strcasecmp(c.homehost, "<none>") == 0)) {
 		c.homehost = NULL;
 		c.require_homehost = 0;
+	}
+
+	if (c.homecluster == NULL && (c.nodes > 0)) {
+		c.homecluster = conf_get_homecluster();
+		if (c.homecluster == NULL)
+			rv = get_cluster_name(&c.homecluster);
+		if (rv == 0) {
+			c.homehost = xstrdup(c.homecluster);
+			/* Add a : to differentiate between a host
+			 * and a cluster */
+			strcat(c.homehost, ":");
+		}
 	}
 
 	if (c.backup_file && data_offset != INVALID_SECTORS) {
