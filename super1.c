@@ -2144,6 +2144,10 @@ add_internal_bitmap1(struct supertype *st,
 	bms->daemon_sleep = __cpu_to_le32(delay);
 	bms->sync_size = __cpu_to_le64(size);
 	bms->write_behind = __cpu_to_le32(write_behind);
+	bms->nodes = __cpu_to_le32(st->cluster_nodes);
+	if (st->cluster_name)
+		strncpy((char *)bms->cluster_name,
+				st->cluster_name, strlen(st->cluster_name));
 
 	*chunkp = chunk;
 	return 1;
@@ -2173,7 +2177,7 @@ static int write_bitmap1(struct supertype *st, int fd)
 {
 	struct mdp_superblock_1 *sb = st->sb;
 	bitmap_super_t *bms = (bitmap_super_t*)(((char*)sb)+MAX_SB_SIZE);
-	int rv = 0;
+	int i, rv = 0;
 	void *buf;
 	int towrite, n;
 	struct align_fd afd;
@@ -2185,27 +2189,41 @@ static int write_bitmap1(struct supertype *st, int fd)
 	if (posix_memalign(&buf, 4096, 4096))
 		return -ENOMEM;
 
-	memset(buf, 0xff, 4096);
-	memcpy(buf, (char *)bms, sizeof(bitmap_super_t));
-
-	towrite = __le64_to_cpu(bms->sync_size) / (__le32_to_cpu(bms->chunksize)>>9);
-	towrite = (towrite+7) >> 3; /* bits to bytes */
-	towrite += sizeof(bitmap_super_t);
-	towrite = ROUND_UP(towrite, 512);
-	while (towrite > 0) {
-		n = towrite;
-		if (n > 4096)
-			n = 4096;
-		n = awrite(&afd, buf, n);
-		if (n > 0)
-			towrite -= n;
+	for (i = 0; i < st->cluster_nodes; i++) {
+		/* Only the first bitmap should resync
+		 * the whole device
+		 */
+		if (i)
+			memset(buf, 0x00, 4096);
 		else
+			memset(buf, 0xff, 4096);
+		memcpy(buf, (char *)bms, sizeof(bitmap_super_t));
+
+		towrite = __le64_to_cpu(bms->sync_size) / (__le32_to_cpu(bms->chunksize)>>9);
+		towrite = (towrite+7) >> 3; /* bits to bytes */
+		towrite += sizeof(bitmap_super_t);
+		/* we need the bitmaps to be at 4k boundary */
+		towrite = ROUND_UP(towrite, 4096);
+		while (towrite > 0) {
+			n = towrite;
+			if (n > 4096)
+				n = 4096;
+			n = awrite(&afd, buf, n);
+			if (n > 0)
+				towrite -= n;
+			else
+				break;
+			if (i)
+				memset(buf, 0x00, 4096);
+			else
+				memset(buf, 0xff, 4096);
+		}
+		fsync(fd);
+		if (towrite) {
+			rv = -2;
 			break;
-		memset(buf, 0xff, 4096);
+		}
 	}
-	fsync(fd);
-	if (towrite)
-		rv = -2;
 
 	free(buf);
 	return rv;
