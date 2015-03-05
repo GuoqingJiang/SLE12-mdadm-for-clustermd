@@ -343,6 +343,7 @@ enum special_options {
 	Dump,
 	Restore,
 	Action,
+	Nodes,
 };
 
 enum prefix_standard {
@@ -417,6 +418,7 @@ struct context {
 	char	*backup_file;
 	int	invalid_backup;
 	char	*action;
+	int	nodes;
 };
 
 struct shape {
@@ -1022,6 +1024,7 @@ struct supertype {
 			 */
 	int devcnt;
 	int retry_soon;
+	int cluster_nodes;
 
 	struct mdinfo *devs;
 

@@ -596,7 +596,14 @@ int main(int argc, char *argv[])
 			}
 			ident.raid_disks = s.raiddisks;
 			continue;
-
+		case O(CREATE, Nodes):
+			c.nodes = parse_num(optarg);
+			if (c.nodes <= 0) {
+				pr_err("invalid number for the number of "
+						"cluster nodes: %s\n", optarg);
+				exit(2);
+			}
+			continue;
 		case O(CREATE,'x'): /* number of spare (eXtra) disks */
 			if (s.sparedisks) {
 				pr_err("spare-devices set twice: %d and %s\n",
