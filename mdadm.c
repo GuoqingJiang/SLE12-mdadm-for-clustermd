@@ -195,12 +195,12 @@ int main(int argc, char *argv[])
 		case 'f':
 		case Fail:
 		case ReAdd: /* re-add */
+		case ClusterConfirm:
 			if (!mode) {
 				newmode = MANAGE;
 				shortopt = short_bitmap_options;
 			}
 			break;
-
 		case 'A': newmode = ASSEMBLE;
 			shortopt = short_bitmap_auto_options;
 			break;
@@ -288,7 +288,6 @@ int main(int argc, char *argv[])
 			if (opt == 1) {
 				if (devs_found == 0) {
 					dv = xmalloc(sizeof(*dv));
-					dv->devname = optarg;
 					dv->disposition = devmode;
 					dv->writemostly = writemostly;
 					dv->used = 0;
@@ -949,6 +948,9 @@ int main(int argc, char *argv[])
 					   * even though we will both fail and
 					   * remove the device */
 			devmode = 'f';
+			continue;
+		case O(MANAGE, ClusterConfirm):
+			devmode = 'c';
 			continue;
 		case O(MANAGE,Replace):
 			/* Mark these devices for replacement */

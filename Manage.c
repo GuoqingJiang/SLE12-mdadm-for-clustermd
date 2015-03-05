@@ -700,7 +700,8 @@ skip_re_add:
 int Manage_add(int fd, int tfd, struct mddev_dev *dv,
 	       struct supertype *tst, mdu_array_info_t *array,
 	       int force, int verbose, char *devname,
-	       char *update, unsigned long rdev, unsigned long long array_size)
+	       char *update, unsigned long rdev, unsigned long long array_size,
+	       int raid_slot)
 {
 	unsigned long long ldsize;
 	struct supertype *dev_st = NULL;
@@ -744,7 +745,6 @@ int Manage_add(int fd, int tfd, struct mddev_dev *dv,
 		       dv->devname, strerror(errno));
 		return -1;
 	}
-
 	if (array->not_persistent == 0 || tst->ss->external) {
 
 		/* need to find a sample superblock to copy, and
@@ -893,7 +893,10 @@ int Manage_add(int fd, int tfd, struct mddev_dev *dv,
 	}
 	disc.major = major(rdev);
 	disc.minor = minor(rdev);
-	disc.number =j;
+	if (raid_slot < 0)
+		disc.number = j;
+	else
+		disc.number = raid_slot;
 	disc.state = 0;
 	if (array->not_persistent==0) {
 		int dfd;
@@ -934,6 +937,14 @@ int Manage_add(int fd, int tfd, struct mddev_dev *dv,
 			}
 		free(used);
 	}
+
+	if (array->state & (1 << MD_SB_CLUSTERED)) {
+		if (dv->disposition == 'c')
+			disc.state |= (1 << MD_DISK_CANDIDATE);
+		else
+			disc.state |= (1 << MD_DISK_CLUSTER_ADD);
+	}
+
 	if (dv->writemostly == 1)
 		disc.state |= (1 << MD_DISK_WRITEMOSTLY);
 	if (tst->ss->external) {
@@ -1257,6 +1268,7 @@ int Manage_subdevs(char *devname, int fd,
 	 *        variant on 'A'
 	 *  'F' - Another variant of 'A', where the device was faulty
 	 *        so must be removed from the array first.
+	 *  'c' - confirm the device as found (for clustered environments)
 	 *
 	 * For 'f' and 'r', the device can also be a kernel-internal
 	 * name such as 'sdb'.
@@ -1273,6 +1285,7 @@ int Manage_subdevs(char *devname, int fd,
 	struct mdinfo info;
 	int frozen = 0;
 	int busy = 0;
+	int raid_slot = -1;
 
 	if (ioctl(fd, GET_ARRAY_INFO, &array)) {
 		pr_err("Cannot get array info for %s\n",
@@ -1299,6 +1312,11 @@ int Manage_subdevs(char *devname, int fd,
 	stb.st_rdev = 0;
 	for (dv = devlist; dv; dv = dv->next) {
 		int rv;
+
+		raid_slot = -1;
+		if (dv->disposition == 'c')
+			parse_cluster_confirm_arg(dv->devname, &dv->devname,
+					&raid_slot);
 
 		if (strcmp(dv->devname, "failed") == 0 ||
 		    strcmp(dv->devname, "faulty") == 0) {
@@ -1327,6 +1345,11 @@ int Manage_subdevs(char *devname, int fd,
 		if (strcmp(dv->devname, "missing") == 0) {
 			struct mddev_dev *add_devlist = NULL;
 			struct mddev_dev **dp;
+			if (dv->disposition == 'c') {
+				rv = ioctl(fd, CLUSTERED_DISK_NACK, NULL);
+				break;
+			}
+
 			if (dv->disposition != 'A') {
 				pr_err("'missing' only meaningful "
 				       "with --re-add\n");
@@ -1415,8 +1438,9 @@ int Manage_subdevs(char *devname, int fd,
 				fstat(tfd, &stb);
 			else {
 				int open_err = errno;
+
 				if (stat(dv->devname, &stb) != 0) {
-					pr_err("Cannot find %s: %s\n",
+					pr_err("%s: %d Cannot find %s: %s\n", __func__, __LINE__,
 					       dv->devname, strerror(errno));
 					goto abort;
 				}
@@ -1443,6 +1467,7 @@ int Manage_subdevs(char *devname, int fd,
 				}
 			}
 		}
+
 		switch(dv->disposition){
 		default:
 			pr_err("internal error - devmode[%s]=%d\n",
@@ -1453,6 +1478,7 @@ int Manage_subdevs(char *devname, int fd,
 		case 'A':
 		case 'M': /* --re-add missing */
 		case 'F': /* --re-add faulty  */
+		case 'c': /* --cluster-confirm */
 			/* add the device */
 			if (subarray) {
 				pr_err("Cannot add disks to a"
@@ -1489,7 +1515,7 @@ int Manage_subdevs(char *devname, int fd,
 			}
 			rv = Manage_add(fd, tfd, dv, tst, &array,
 					force, verbose, devname, update,
-					stb.st_rdev, array_size);
+					stb.st_rdev, array_size, raid_slot);
 			close(tfd);
 			tfd = -1;
 			if (rv < 0)

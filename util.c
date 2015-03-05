@@ -273,6 +273,17 @@ long parse_num(char *num)
 }
 #endif
 
+int parse_cluster_confirm_arg(char *input, char **devname, int *slot)
+{
+	char *dev;
+	*slot = strtoul(input, &dev, 10);
+	if (dev[0] == ':')
+		*devname = dev+1;
+	else
+		return -1;
+	return 0;
+}
+
 void remove_partitions(int fd)
 {
 	/* remove partitions from this block devices.
