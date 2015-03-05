@@ -334,9 +334,16 @@ int Grow_addbitmap(char *devname, int fd, struct context *c, struct shape *s)
 			}
 			return 0;
 		}
-		pr_err("Internal bitmap already present on %s\n",
-			devname);
-		return 1;
+		if ((strcmp(s->bitmap_file, "clustered")==0) && (array.state & (1<<MD_SB_CLUSTERED))) {
+			pr_err("Clustered bitmap already present on %s\n",
+					devname);
+			return 1;
+		}
+		if ((strcmp(s->bitmap_file, "internal")==0) && (!(array.state & (1<<MD_SB_CLUSTERED)))) {
+			pr_err("Internal bitmap already present on %s\n",
+					devname);
+			return 1;
+		}
 	}
 
 	if (strcmp(s->bitmap_file, "none") == 0) {
@@ -379,7 +386,8 @@ int Grow_addbitmap(char *devname, int fd, struct context *c, struct shape *s)
 		free(st);
 		return 1;
 	}
-	if (strcmp(s->bitmap_file, "internal") == 0) {
+	if ((strcmp(s->bitmap_file, "internal") == 0) ||
+		(strcmp(s->bitmap_file, "clustered") == 0)) {
 		int rv;
 		int d;
 		int offset_setable = 0;
@@ -389,6 +397,8 @@ int Grow_addbitmap(char *devname, int fd, struct context *c, struct shape *s)
 				"with %s metadata\n", st->ss->name);
 			return 1;
 		}
+		st->cluster_nodes = c->nodes;
+		st->cluster_name = c->homecluster;
 		mdi = sysfs_read(fd, NULL, GET_BITMAP_LOCATION);
 		if (mdi)
 			offset_setable = 1;
@@ -432,6 +442,8 @@ int Grow_addbitmap(char *devname, int fd, struct context *c, struct shape *s)
 			rv = sysfs_set_num_signed(mdi, NULL, "bitmap/location",
 						  mdi->bitmap_offset);
 		} else {
+			if (strcmp(s->bitmap_file, "clustered") == 0)
+				array.state |= (1<<MD_SB_CLUSTERED);
 			array.state |= (1<<MD_SB_BITMAP_PRESENT);
 			rv = ioctl(fd, SET_ARRAY_INFO, &array);
 		}
