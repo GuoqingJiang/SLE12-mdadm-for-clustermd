@@ -1029,7 +1029,8 @@ int Manage_add(int fd, int tfd, struct mddev_dev *dv,
 }
 
 int Manage_remove(struct supertype *tst, int fd, struct mddev_dev *dv,
-		  int sysfd, unsigned long rdev, int verbose, char *devname)
+		  int sysfd, unsigned long rdev, int force, int verbose,
+		  char *devname)
 {
 	int lfd = -1;
 	int err;
@@ -1088,7 +1089,9 @@ int Manage_remove(struct supertype *tst, int fd, struct mddev_dev *dv,
 		else
 			err = 0;
 	} else {
-		err = ioctl(fd, HOT_REMOVE_DISK, rdev);
+		do {
+			err = ioctl(fd, HOT_REMOVE_DISK, rdev);
+		} while (err && errno == EBUSY && force && usleep(50000) == 0);
 		if (err && errno == ENODEV) {
 			/* Old kernels rejected this if no personality
 			 * is registered */
@@ -1477,10 +1480,14 @@ int Manage_subdevs(char *devname, int fd,
 					" operation on the parent container\n");
 				goto abort;
 			}
-			if (dv->disposition == 'F')
+			if (dv->disposition == 'F') {
 				/* Need to remove first */
-				ioctl(fd, HOT_REMOVE_DISK,
-				      (unsigned long)stb.st_rdev);
+				int err;
+				do {
+					err = ioctl(fd, HOT_REMOVE_DISK,
+						    (unsigned long)stb.st_rdev);
+				} while (err && errno == EBUSY && force && usleep(50000) == 0);
+			}
 			/* Make sure it isn't in use (in 2.6 or later) */
 			tfd = dev_open(dv->devname, O_RDONLY|O_EXCL);
 			if (tfd >= 0) {
@@ -1524,7 +1531,7 @@ int Manage_subdevs(char *devname, int fd,
 				rv = -1;
 			} else
 				rv = Manage_remove(tst, fd, dv, sysfd,
-						   stb.st_rdev, verbose,
+						   stb.st_rdev, verbose, force,
 						   devname);
 			if (sysfd >= 0)
 				close(sysfd);
