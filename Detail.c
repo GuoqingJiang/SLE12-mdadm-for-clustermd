@@ -634,6 +634,7 @@ This is pretty boring
 				    disk.raid_disk >= 0)
 					failed++;
 			}
+			if (disk.state & (1<<MD_DISK_TIMEOUT)) printf(" timeout");
 			if (disk.state & (1<<MD_DISK_ACTIVE)) printf(" active");
 			if (disk.state & (1<<MD_DISK_SYNC)) {
 				printf(" sync");
