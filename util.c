@@ -24,6 +24,7 @@
 
 #include	"mdadm.h"
 #include	"md_p.h"
+#include	<sys/poll.h>
 #include	<sys/socket.h>
 #include	<sys/utsname.h>
 #include	<sys/wait.h>
@@ -41,6 +42,10 @@
  #define CS_OK 1
 #else
  #include	<corosync/cmap.h>
+#endif
+#ifndef NO_DLM
+#include	<libdlm.h>
+#include	<errno.h>
 #endif
 
 
@@ -87,6 +92,128 @@ struct blkpg_partition {
    e.g. in a structure initializer (or where-ever else comma expressions
    aren't permitted). */
 #define BUILD_BUG_ON_ZERO(e) (sizeof(struct { int:-!!(e); }))
+
+#ifndef NO_DLM
+struct dlm_lock_resource {
+	dlm_lshandle_t *ls;
+	struct dlm_lksb lksb;
+};
+
+struct dlm_lock_resource *dlm_lock_res = NULL;
+static int ast_called = 0;
+
+int is_clustered(struct supertype *st)
+{
+	/* is it a cluster md or not */
+	return st->cluster_name ? 1 :0;
+}
+
+/* Using poll(2) to wait for and dispatch ASTs */
+static int poll_for_ast(dlm_lshandle_t ls)
+{
+	struct pollfd pfd;
+
+	pfd.fd = dlm_ls_get_fd(ls);
+	pfd.events = POLLIN;
+
+	while (!ast_called)
+	{
+		if (poll(&pfd, 1, 0) < 0)
+		{
+			perror("poll");
+			return -1;
+		}
+		dlm_dispatch(dlm_ls_get_fd(ls));
+	}
+	ast_called = 0;
+
+	return 0;
+}
+
+static void dlm_ast(void *arg)
+{
+	ast_called = 1;
+}
+
+/* Create the lockspace, take bitmapXXX locks on all the bitmaps. */
+int cluster_get_dlmlock(struct supertype *st, int *lockid)
+{
+	int ret;
+	char str[64];
+	int flags = LKF_NOQUEUE;
+
+	dlm_lock_res = xmalloc(sizeof(struct dlm_lock_resource));
+	if (!dlm_lock_res)
+		return -ENOMEM;
+
+	dlm_lock_res->ls = dlm_create_lockspace(st->cluster_name, O_RDWR);
+	if (!dlm_lock_res->ls) {
+		pr_err("%s failed to create lockspace\n", st->cluster_name);
+		return -1;
+	}
+
+	/* Conversions need the lockid in the LKSB */
+	if (flags & LKF_CONVERT)
+		dlm_lock_res->lksb.sb_lkid = *lockid;
+
+	snprintf(str, 64, "bitmap%04d", st->nodes);
+	/* if flags with LKF_CONVERT causes below return ENOENT which means
+	 * "No such file or directory" */
+	ret = dlm_ls_lock(dlm_lock_res->ls, LKM_PWMODE, &dlm_lock_res->lksb,
+			  flags, str, strlen(str), 0, dlm_ast,
+			  dlm_lock_res, NULL, NULL);
+	if (ret) {
+		pr_err("error %d when get PW mode on lock %s\n", errno, str);
+		return ret;
+	}
+
+	/* Wait for it to complete */
+	poll_for_ast(dlm_lock_res->ls);
+	*lockid = dlm_lock_res->lksb.sb_lkid;
+
+	errno =	dlm_lock_res->lksb.sb_status;
+	if (errno) {
+	    pr_err("error %d happened in ast with lock %s\n", errno, str);
+	    return -1;
+	}
+
+	return 0;
+}
+
+int cluster_release_dlmlock(struct supertype *st, int lockid)
+{
+	int ret;
+
+	/* if flags with LKF_CONVERT causes below return EINVAL which means
+	 * "Invalid argument" */
+	ret = dlm_ls_unlock(dlm_lock_res->ls, lockid, 0, &dlm_lock_res->lksb, dlm_lock_res);
+	if (ret) {
+		pr_err("error %d happened when unlock\n", errno);
+		/* XXX make sure the lock is unlocked eventually */
+		return ret;
+	}
+
+	/* Wait for it to complete */
+	poll_for_ast(dlm_lock_res->ls);
+
+	errno =	dlm_lock_res->lksb.sb_status;
+	if (errno != EUNLOCK) {
+		pr_err("error %d happened in ast when unlock lockspace\n", errno);
+		/* XXX make sure the lockspace is unlocked eventually */
+		return -1;
+	}
+
+	ret = dlm_release_lockspace(st->cluster_name, dlm_lock_res->ls, 1);
+	if (ret) {
+		pr_err("error %d happened when release lockspace\n", errno);
+		/* XXX make sure the lockspace is released eventually */
+		return ret;
+	}
+	free(dlm_lock_res);
+
+	return 0;
+}
+#endif
 
 /*
  * Parse a 128 bit uuid in 4 integers

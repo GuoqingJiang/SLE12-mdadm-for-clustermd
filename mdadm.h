@@ -1429,6 +1429,9 @@ extern char *fd2devnm(int fd);
 
 extern int in_initrd(void);
 extern int get_cluster_name(char **name);
+extern int is_clustered(struct supertype *st);
+extern int cluster_get_dlmlock(struct supertype *st, int *lockid);
+extern int cluster_release_dlmlock(struct supertype *st, int lockid);
 
 #define _ROUND_UP(val, base)	(((val) + (base) - 1) & ~(base - 1))
 #define ROUND_UP(val, base)	_ROUND_UP(val, (typeof(val))(base))

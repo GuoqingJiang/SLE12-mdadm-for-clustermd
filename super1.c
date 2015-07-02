@@ -1081,6 +1081,18 @@ static int update_super1(struct supertype *st, struct mdinfo *info,
 	int rv = 0;
 	struct mdp_superblock_1 *sb = st->sb;
 
+#ifndef NO_DLM
+	int lockid;
+	if (is_clustered(st)) {
+		rv = cluster_get_dlmlock(st, &lockid);
+		if (rv) {
+			pr_err("Cannot get dlmlock in %s return %d\n", __func__, rv);
+			cluster_release_dlmlock(st, lockid);
+			return rv;
+		}
+	}
+#endif
+
 	if (strcmp(update, "homehost") == 0 &&
 	    homehost) {
 		/* Note that 'homehost' is special as it is really
@@ -1345,6 +1357,10 @@ static int update_super1(struct supertype *st, struct mdinfo *info,
 		rv = -1;
 
 	sb->sb_csum = calc_sb_1_csum(sb);
+#ifndef NO_DLM
+	if (is_clustered(st))
+		cluster_release_dlmlock(st, lockid);
+#endif
 	return rv;
 }
 
@@ -1449,6 +1465,17 @@ static int add_to_super1(struct supertype *st, mdu_disk_info_t *dk,
 	__u16 *rp = sb->dev_roles + dk->number;
 	struct devinfo *di, **dip;
 
+#ifndef NO_DLM
+	int rv, lockid;
+	if (is_clustered(st)) {
+		rv = cluster_get_dlmlock(st, &lockid);
+		if (rv) {
+			pr_err("Cannot get dlmlock in %s return %d\n", __func__, rv);
+			cluster_release_dlmlock(st, lockid);
+			return rv;
+		}
+	}
+#endif
 	if ((dk->state & 6) == 6) /* active, sync */
 		*rp = __cpu_to_le16(dk->raid_disk);
 	else if ((dk->state & ~2) == 0) /* active or idle -> spare */
@@ -1475,6 +1502,10 @@ static int add_to_super1(struct supertype *st, mdu_disk_info_t *dk,
 	di->next = NULL;
 	*dip = di;
 
+#ifndef NO_DLM
+	if (is_clustered(st))
+		cluster_release_dlmlock(st, lockid);
+#endif
 	return 0;
 }
 #endif
@@ -1488,6 +1519,18 @@ static int store_super1(struct supertype *st, int fd)
 	struct align_fd afd;
 	int sbsize;
 	unsigned long long dsize;
+
+#ifndef NO_DLM
+	int rv, lockid;
+	if (is_clustered(st)) {
+		rv = cluster_get_dlmlock(st, &lockid);
+		if (rv) {
+			pr_err("Cannot get dlmlock in %s return %d\n", __func__, rv);
+			cluster_release_dlmlock(st, lockid);
+			return rv;
+		}
+	}
+#endif
 
 	if (!get_dev_size(fd, NULL, &dsize))
 		return 1;
@@ -1548,6 +1591,10 @@ static int store_super1(struct supertype *st, int fd)
 		}
 	}
 	fsync(fd);
+#ifndef NO_DLM
+	if (is_clustered(st))
+		cluster_release_dlmlock(st, lockid);
+#endif
 	return 0;
 }
 
@@ -2295,6 +2342,17 @@ static int write_bitmap1(struct supertype *st, int fd, enum bitmap_update update
 
 static void free_super1(struct supertype *st)
 {
+#ifndef NO_DLM
+	int rv, lockid;
+	if (is_clustered(st)) {
+		rv = cluster_get_dlmlock(st, &lockid);
+		if (rv) {
+			pr_err("Cannot get dlmlock in %s return %d\n", __func__, rv);
+			cluster_release_dlmlock(st, lockid);
+			return;
+		}
+	}
+#endif
 	if (st->sb)
 		free(st->sb);
 	while (st->info) {
@@ -2305,6 +2363,10 @@ static void free_super1(struct supertype *st)
 		free(di);
 	}
 	st->sb = NULL;
+#ifndef NO_DLM
+	if (is_clustered(st))
+		cluster_release_dlmlock(st, lockid);
+#endif
 }
 
 #ifndef MDASSEMBLE
